@@ -54,6 +54,5 @@ coverage/
 *.cover
 
 # Misc
-.DS_Store
 *.pem
 .cache/
