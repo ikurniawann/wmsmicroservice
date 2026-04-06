@@ -1,6 +1,6 @@
 -- ============================================
 -- Create Admin User
--- Run this after running supabase_complete_setup.sql
+-- Run this AFTER running supabase_complete_setup.sql
 -- ============================================
 
 -- Note: This uses a pre-computed bcrypt hash for password "admin123"
@@ -12,11 +12,11 @@ DECLARE
     superadmin_role_id UUID;
 BEGIN
     -- Get superadmin role id
-    SELECT id INTO superadmin_role_id FROM auth.roles WHERE name = 'superadmin';
+    SELECT id INTO superadmin_role_id FROM wms_auth.roles WHERE name = 'superadmin';
     
     -- Create admin user if not exists
-    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE username = 'admin') THEN
-        INSERT INTO auth.users (
+    IF NOT EXISTS (SELECT 1 FROM wms_auth.users WHERE username = 'admin') THEN
+        INSERT INTO wms_auth.users (
             email, 
             username, 
             password_hash, 
@@ -36,7 +36,7 @@ BEGIN
         RETURNING id INTO admin_user_id;
         
         -- Assign superadmin role
-        INSERT INTO auth.user_roles (user_id, role_id)
+        INSERT INTO wms_auth.user_roles (user_id, role_id)
         VALUES (admin_user_id, superadmin_role_id);
         
         RAISE NOTICE 'Admin user created successfully';
@@ -47,7 +47,7 @@ END $$;
 
 -- Verify admin user
 SELECT u.id, u.username, u.email, u.first_name, u.last_name, r.name as role
-FROM auth.users u
-JOIN auth.user_roles ur ON u.id = ur.user_id
-JOIN auth.roles r ON ur.role_id = r.id
+FROM wms_auth.users u
+JOIN wms_auth.user_roles ur ON u.id = ur.user_id
+JOIN wms_auth.roles r ON ur.role_id = r.id
 WHERE u.username = 'admin';

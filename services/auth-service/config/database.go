@@ -18,7 +18,7 @@ func InitDB() {
 	user := getEnv("DB_USER", "postgres")
 	password := getEnv("DB_PASSWORD", "")
 	dbname := getEnv("DB_NAME", "postgres")
-	schema := getEnv("DB_SCHEMA", "public")
+	schema := getEnv("DB_SCHEMA", "wms_auth") // Default to wms_auth
 
 	// Build DSN for Supabase or local
 	var dsn string

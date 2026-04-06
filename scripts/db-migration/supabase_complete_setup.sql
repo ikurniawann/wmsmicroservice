@@ -1,5 +1,6 @@
 -- ============================================
 -- WMS Microservices - Complete Database Setup
+-- FIXED: Use public schema instead of auth (reserved)
 -- Run this in Supabase SQL Editor
 -- ============================================
 
@@ -7,13 +8,13 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================
--- SCHEMA: auth
+-- SCHEMA: wms_auth (custom auth schema)
 -- ============================================
-DROP SCHEMA IF EXISTS auth CASCADE;
-CREATE SCHEMA auth;
+DROP SCHEMA IF EXISTS wms_auth CASCADE;
+CREATE SCHEMA wms_auth;
 
 -- Users table
-CREATE TABLE auth.users (
+CREATE TABLE wms_auth.users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(100) UNIQUE NOT NULL,
@@ -29,7 +30,7 @@ CREATE TABLE auth.users (
 );
 
 -- Roles table
-CREATE TABLE auth.roles (
+CREATE TABLE wms_auth.roles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(50) UNIQUE NOT NULL,
     description TEXT,
@@ -38,17 +39,17 @@ CREATE TABLE auth.roles (
 );
 
 -- User roles junction table
-CREATE TABLE auth.user_roles (
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    role_id UUID REFERENCES auth.roles(id) ON DELETE CASCADE,
+CREATE TABLE wms_auth.user_roles (
+    user_id UUID REFERENCES wms_auth.users(id) ON DELETE CASCADE,
+    role_id UUID REFERENCES wms_auth.roles(id) ON DELETE CASCADE,
     assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, role_id)
 );
 
 -- Refresh tokens table
-CREATE TABLE auth.refresh_tokens (
+CREATE TABLE wms_auth.refresh_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES wms_auth.users(id) ON DELETE CASCADE,
     token_hash VARCHAR(255) NOT NULL,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -56,14 +57,14 @@ CREATE TABLE auth.refresh_tokens (
 );
 
 -- Enable RLS
-ALTER TABLE auth.users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE auth.roles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE auth.user_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wms_auth.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wms_auth.roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wms_auth.user_roles ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for now, restrict later)
-CREATE POLICY "Allow all" ON auth.users FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all" ON auth.roles FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all" ON auth.user_roles FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all" ON wms_auth.users FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all" ON wms_auth.roles FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all" ON wms_auth.user_roles FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
 -- SCHEMA: wms (Warehouse Management System)
@@ -86,7 +87,7 @@ CREATE TABLE wms.warehouses (
     email VARCHAR(255),
     is_active BOOLEAN DEFAULT TRUE,
     is_default BOOLEAN DEFAULT FALSE,
-    created_by UUID REFERENCES auth.users(id),
+    created_by UUID REFERENCES wms_auth.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -147,7 +148,7 @@ CREATE TABLE wms.products (
     selling_price DECIMAL(15, 2),
     is_active BOOLEAN DEFAULT TRUE,
     is_tracked BOOLEAN DEFAULT TRUE, -- Track inventory or not
-    created_by UUID REFERENCES auth.users(id),
+    created_by UUID REFERENCES wms_auth.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -181,7 +182,7 @@ CREATE TABLE wms.stock_movements (
     reference_id UUID,
     reference_number VARCHAR(100),
     notes TEXT,
-    created_by UUID REFERENCES auth.users(id),
+    created_by UUID REFERENCES wms_auth.users(id),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -208,7 +209,7 @@ CREATE POLICY "Allow all" ON wms.stock_movements FOR ALL USING (true) WITH CHECK
 -- ============================================
 
 -- Default roles
-INSERT INTO auth.roles (name, description, permissions) VALUES
+INSERT INTO wms_auth.roles (name, description, permissions) VALUES
 ('superadmin', 'Full system access', '["*"]'::jsonb),
 ('admin', 'Administrative access', '["users:read", "users:write", "products:read", "products:write", "inventory:read", "inventory:write"]'::jsonb),
 ('warehouse_manager', 'Warehouse management', '["inventory:read", "inventory:write", "products:read", "reports:read"]'::jsonb),
@@ -238,11 +239,11 @@ INSERT INTO wms.categories (code, name, description) VALUES
 -- ============================================
 
 -- Auth indexes
-CREATE INDEX idx_users_email ON auth.users(email);
-CREATE INDEX idx_users_username ON auth.users(username);
-CREATE INDEX idx_users_active ON auth.users(is_active);
-CREATE INDEX idx_refresh_tokens_user ON auth.refresh_tokens(user_id);
-CREATE INDEX idx_refresh_tokens_expires ON auth.refresh_tokens(expires_at);
+CREATE INDEX idx_users_email ON wms_auth.users(email);
+CREATE INDEX idx_users_username ON wms_auth.users(username);
+CREATE INDEX idx_users_active ON wms_auth.users(is_active);
+CREATE INDEX idx_refresh_tokens_user ON wms_auth.refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_expires ON wms_auth.refresh_tokens(expires_at);
 
 -- WMS indexes
 CREATE INDEX idx_warehouses_code ON wms.warehouses(code);
