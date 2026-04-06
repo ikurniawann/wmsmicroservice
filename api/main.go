@@ -19,27 +19,18 @@ import (
 
 // Models
 type User struct {
-	ID           uuid.UUID `json:"id" gorm:"type:uuid;primary_key;default:uuid_generate_v4()"`
-	Email        string    `json:"email" gorm:"uniqueIndex;not null"`
-	Username     string    `json:"username" gorm:"uniqueIndex;not null"`
-	PasswordHash string    `json:"-" gorm:"not null"`
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	Phone        string    `json:"phone"`
-	IsActive     bool      `json:"is_active" gorm:"default:true"`
-	IsVerified   bool      `json:"is_verified" gorm:"default:false"`
+	ID           uuid.UUID  `json:"id" gorm:"type:uuid;primary_key;default:uuid_generate_v4()"`
+	Email        string     `json:"email" gorm:"uniqueIndex;not null"`
+	Username     string     `json:"username" gorm:"uniqueIndex;not null"`
+	PasswordHash string     `json:"-" gorm:"not null"`
+	FirstName    string     `json:"first_name"`
+	LastName     string     `json:"last_name"`
+	Phone        string     `json:"phone"`
+	IsActive     bool       `json:"is_active" gorm:"default:true"`
+	IsVerified   bool       `json:"is_verified" gorm:"default:false"`
 	LastLoginAt  *time.Time `json:"last_login_at"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
-}
-
-func (u *User) SetPassword(password string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	u.PasswordHash = string(hash)
-	return nil
 }
 
 func (u *User) CheckPassword(password string) bool {
@@ -57,29 +48,29 @@ type Role struct {
 // Database
 var db *gorm.DB
 
-func initDB() {
-	host := getEnv("DB_HOST", "localhost")
+func initDB() error {
+	host := getEnv("DB_HOST", "")
 	port := getEnv("DB_PORT", "5432")
-	user := getEnv("DB_USER", "postgres")
+	user := getEnv("DB_USER", "")
 	password := getEnv("DB_PASSWORD", "")
-	dbname := getEnv("DB_NAME", "postgres")
+	dbname := getEnv("DB_NAME", "")
 
-	var dsn string
-	if host == "localhost" {
-		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-			host, user, password, dbname, port)
-	} else {
-		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
-			host, user, password, dbname, port)
+	// Check required env vars
+	if host == "" || user == "" || password == "" {
+		return fmt.Errorf("database credentials not configured")
 	}
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
+		host, user, password, dbname, port)
 
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
 
 func getEnv(key, defaultValue string) string {
@@ -90,7 +81,7 @@ func getEnv(key, defaultValue string) string {
 }
 
 // JWT
-var jwtSecret = []byte(getEnv("JWT_SECRET", "secret"))
+var jwtSecret = []byte(getEnv("JWT_SECRET", "fallback-secret-key-change-in-production"))
 
 type Claims struct {
 	UserID   string   `json:"user_id"`
@@ -105,7 +96,7 @@ func generateToken(userID uuid.UUID, username, email string) (string, error) {
 		UserID:   userID.String(),
 		Username: username,
 		Email:    email,
-		Roles:    []string{"viewer"},
+		Roles:    []string{},
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -119,11 +110,9 @@ func generateToken(userID uuid.UUID, username, email string) (string, error) {
 // Handlers
 func register(c echo.Context) error {
 	type Request struct {
-		Email     string `json:"email"`
-		Username  string `json:"username"`
-		Password  string `json:"password"`
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	var req Request
@@ -131,19 +120,22 @@ func register(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	user := User{
-		Email:     req.Email,
-		Username:  req.Username,
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-	}
-
-	if err := user.SetPassword(req.Password); err != nil {
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to hash password"})
 	}
 
+	user := User{
+		ID:           uuid.New(),
+		Email:        req.Email,
+		Username:     req.Username,
+		PasswordHash: string(hash),
+		IsActive:     true,
+		IsVerified:   false,
+	}
+
 	if err := db.Create(&user).Error; err != nil {
-		return c.JSON(http.StatusConflict, map[string]string{"error": "User already exists"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create user"})
 	}
 
 	return c.JSON(http.StatusCreated, map[string]interface{}{
@@ -167,6 +159,10 @@ func login(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
+	if db == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Database not initialized"})
+	}
+
 	var user User
 	if err := db.Where("username = ? OR email = ?", req.Username, req.Username).First(&user).Error; err != nil {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid credentials"})
@@ -180,8 +176,8 @@ func login(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "Account deactivated"})
 	}
 
-	user.LastLoginAt = new(time.Time)
-	*user.LastLoginAt = time.Now()
+	now := time.Now()
+	user.LastLoginAt = &now
 	db.Save(&user)
 
 	token, err := generateToken(user.ID, user.Username, user.Email)
@@ -201,25 +197,34 @@ func login(c echo.Context) error {
 	})
 }
 
+// Health check - no DB required
+func health(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{"status": "healthy", "service": "auth"})
+}
+
 // Main Handler
 func Handler(w http.ResponseWriter, r *http.Request) {
 	_ = godotenv.Load()
 
+	// Initialize DB if not already done
 	if db == nil {
-		initDB()
-		db.AutoMigrate(&User{}, &Role{})
+		if err := initDB(); err != nil {
+			// Log error but don't crash
+			fmt.Fprintf(os.Stderr, "Database init error: %v\n", err)
+		}
 	}
 
 	e := echo.New()
-	e.Use(middleware.CORS())
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete},
+	}))
 	e.Use(middleware.Recover())
 
 	// Routes
+	e.GET("/health", health)
 	e.POST("/api/v1/auth/register", register)
 	e.POST("/api/v1/auth/login", login)
-	e.GET("/health", func(c echo.Context) error {
-		return c.JSON(200, map[string]string{"status": "healthy"})
-	})
 
 	e.ServeHTTP(w, r)
 }
