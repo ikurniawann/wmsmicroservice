@@ -48,15 +48,16 @@ type Role struct {
 var db *gorm.DB
 
 func initDB() error {
-	// Supabase connection
+	// Supabase connection with IPv4
 	host := "db.bnpvryotcgvposlbbcbd.supabase.co"
 	port := "5432"
 	user := "postgres"
 	password := "empatTH3010*#"
 	dbname := "postgres"
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
-		host, user, password, dbname, port)
+	// Use prefer simple protocol and force IPv4
+	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=require",
+		user, password, host, port, dbname)
 
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -164,7 +165,7 @@ func login(c echo.Context) error {
 
 	var user User
 	if err := db.Where("username = ? OR email = ?", req.Username, req.Username).First(&user).Error; err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": fmt.Sprintf("User not found: %v", err)})
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid credentials"})
 	}
 
 	if !user.CheckPassword(req.Password) {
