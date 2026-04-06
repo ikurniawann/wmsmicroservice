@@ -8,7 +8,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"golang.org/x/crypto/bcrypt"
@@ -49,16 +48,12 @@ type Role struct {
 var db *gorm.DB
 
 func initDB() error {
-	host := getEnv("DB_HOST", "")
-	port := getEnv("DB_PORT", "5432")
-	user := getEnv("DB_USER", "")
-	password := getEnv("DB_PASSWORD", "")
-	dbname := getEnv("DB_NAME", "")
-
-	// Check required env vars
-	if host == "" || user == "" || password == "" {
-		return fmt.Errorf("database credentials not configured")
-	}
+	// Hardcoded Supabase credentials (untuk testing)
+	host := "db.bnpvryotcgvposlbbcbd.supabase.co"
+	port := "5432"
+	user := "postgres"
+	password := "empatTH3010*#"
+	dbname := "postgres"
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
 		host, user, password, dbname, port)
@@ -80,8 +75,8 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// JWT
-var jwtSecret = []byte(getEnv("JWT_SECRET", "fallback-secret-key-change-in-production"))
+// JWT - hardcoded untuk testing
+var jwtSecret = []byte("wms-super-secret-key-for-jwt-signing-2026")
 
 type Claims struct {
 	UserID   string   `json:"user_id"`
@@ -204,13 +199,11 @@ func health(c echo.Context) error {
 
 // Main Handler
 func Handler(w http.ResponseWriter, r *http.Request) {
-	_ = godotenv.Load()
-
 	// Initialize DB if not already done
 	if db == nil {
 		if err := initDB(); err != nil {
-			// Log error but don't crash
 			fmt.Fprintf(os.Stderr, "Database init error: %v\n", err)
+			// Continue without DB - health check still works
 		}
 	}
 
