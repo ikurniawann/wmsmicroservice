@@ -1,13 +1,15 @@
 {
   "version": 2,
-  "buildCommand": null,
-  "installCommand": null,
-  "framework": null,
-  "outputDirectory": null,
-  "rewrites": [
+  "builds": [
     {
-      "source": "/api/v1/(.*)",
-      "destination": "/api/main.go"
+      "src": "api/main.go",
+      "use": "@vercel/go"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/main.go"
     }
   ]
 }
