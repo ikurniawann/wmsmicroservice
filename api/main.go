@@ -48,7 +48,7 @@ type Role struct {
 var db *gorm.DB
 
 func initDB() error {
-	// Hardcoded Supabase credentials (untuk testing)
+	// Supabase connection
 	host := "db.bnpvryotcgvposlbbcbd.supabase.co"
 	port := "5432"
 	user := "postgres"
@@ -63,8 +63,12 @@ func initDB() error {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("database connection failed: %v", err)
 	}
+	
+	// Auto migrate
+	db.AutoMigrate(&User{}, &Role{})
+	
 	return nil
 }
 
@@ -75,7 +79,7 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// JWT - hardcoded untuk testing
+// JWT
 var jwtSecret = []byte("wms-super-secret-key-for-jwt-signing-2026")
 
 type Claims struct {
@@ -130,7 +134,7 @@ func register(c echo.Context) error {
 	}
 
 	if err := db.Create(&user).Error; err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create user"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create user: %v", err)})
 	}
 
 	return c.JSON(http.StatusCreated, map[string]interface{}{
@@ -160,7 +164,7 @@ func login(c echo.Context) error {
 
 	var user User
 	if err := db.Where("username = ? OR email = ?", req.Username, req.Username).First(&user).Error; err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid credentials"})
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": fmt.Sprintf("User not found: %v", err)})
 	}
 
 	if !user.CheckPassword(req.Password) {
@@ -192,9 +196,17 @@ func login(c echo.Context) error {
 	})
 }
 
-// Health check - no DB required
+// Health check
 func health(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"status": "healthy", "service": "auth"})
+	dbStatus := "connected"
+	if db == nil {
+		dbStatus = "disconnected"
+	}
+	return c.JSON(http.StatusOK, map[string]string{
+		"status":     "healthy",
+		"service":    "auth",
+		"db_status":  dbStatus,
+	})
 }
 
 // Main Handler
@@ -203,7 +215,6 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	if db == nil {
 		if err := initDB(); err != nil {
 			fmt.Fprintf(os.Stderr, "Database init error: %v\n", err)
-			// Continue without DB - health check still works
 		}
 	}
 
