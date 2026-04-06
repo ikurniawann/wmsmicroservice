@@ -48,36 +48,29 @@ type Role struct {
 var db *gorm.DB
 
 func initDB() error {
-	// Supabase connection with IPv4
-	host := "db.bnpvryotcgvposlbbcbd.supabase.co"
-	port := "5432"
-	user := "postgres"
-	password := "empatTH3010*#"
-	dbname := "postgres"
-
-	// Use prefer simple protocol and force IPv4
-	dsn := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=require",
-		user, password, host, port, dbname)
+	// Supabase connection string
+	dsn := "postgresql://postgres:empatTH3010*#@db.bnpvryotcgvposlbbcbd.supabase.co:5432/postgres?sslmode=require"
 
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Database connection error: %v\n", err)
 		return fmt.Errorf("database connection failed: %v", err)
 	}
 	
+	fmt.Println("Database connected successfully")
+	
 	// Auto migrate
-	db.AutoMigrate(&User{}, &Role{})
+	if err := db.AutoMigrate(&User{}, &Role{}); err != nil {
+		fmt.Fprintf(os.Stderr, "AutoMigrate error: %v\n", err)
+		return fmt.Errorf("auto migrate failed: %v", err)
+	}
+	
+	fmt.Println("AutoMigrate completed")
 	
 	return nil
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 // JWT
@@ -120,8 +113,18 @@ func register(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
+	// Validate
+	if req.Username == "" || req.Email == "" || req.Password == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "All fields are required"})
+	}
+
+	if db == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Database not initialized"})
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Password hash error: %v\n", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to hash password"})
 	}
 
@@ -135,11 +138,12 @@ func register(c echo.Context) error {
 	}
 
 	if err := db.Create(&user).Error; err != nil {
+		fmt.Fprintf(os.Stderr, "Create user error: %v\n", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create user: %v", err)})
 	}
 
 	return c.JSON(http.StatusCreated, map[string]interface{}{
-		"message": "User registered",
+		"message": "User registered successfully",
 		"user": map[string]string{
 			"id":       user.ID.String(),
 			"email":    user.Email,
@@ -157,6 +161,10 @@ func login(c echo.Context) error {
 	var req Request
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+	}
+
+	if req.Username == "" || req.Password == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Username and password are required"})
 	}
 
 	if db == nil {
@@ -216,6 +224,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	if db == nil {
 		if err := initDB(); err != nil {
 			fmt.Fprintf(os.Stderr, "Database init error: %v\n", err)
+			// Continue without DB - health check still works
 		}
 	}
 
