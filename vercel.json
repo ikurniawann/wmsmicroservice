@@ -1,15 +1,9 @@
 {
-  "buildCommand": "go build -o dist/api ./api/main.go",
   "framework": null,
-  "installCommand": "go mod tidy",
-  "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/v1/auth/(.*)", "destination": "/api/main" },
     { "source": "/api/v1/users/(.*)", "destination": "/api/main" },
     { "source": "/api/v1/roles/(.*)", "destination": "/api/main" },
     { "source": "/health", "destination": "/api/main" }
-  ],
-  "env": {
-    "GO_BUILD_FLAGS": "-ldflags=-w -s"
-  }
+  ]
 }
