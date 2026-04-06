@@ -3,7 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
-	"os"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -11,25 +11,26 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+)
+
+// In-memory storage for serverless
+var (
+	users = make(map[string]User)
+	mu    sync.RWMutex
 )
 
 // Models
 type User struct {
-	ID           uuid.UUID  `json:"id" gorm:"type:uuid;primary_key;default:uuid_generate_v4()"`
-	Email        string     `json:"email" gorm:"uniqueIndex;not null"`
-	Username     string     `json:"username" gorm:"uniqueIndex;not null"`
-	PasswordHash string     `json:"-" gorm:"not null"`
-	FirstName    string     `json:"first_name"`
-	LastName     string     `json:"last_name"`
-	Phone        string     `json:"phone"`
-	IsActive     bool       `json:"is_active" gorm:"default:true"`
-	IsVerified   bool       `json:"is_verified" gorm:"default:false"`
-	LastLoginAt  *time.Time `json:"last_login_at"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	FirstName    string    `json:"first_name"`
+	LastName     string    `json:"last_name"`
+	IsActive     bool      `json:"is_active"`
+	IsVerified   bool      `json:"is_verified"`
+	LastLoginAt  time.Time `json:"last_login_at"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 func (u *User) CheckPassword(password string) bool {
@@ -37,40 +38,25 @@ func (u *User) CheckPassword(password string) bool {
 	return err == nil
 }
 
-type Role struct {
-	ID          uuid.UUID `json:"id" gorm:"type:uuid;primary_key;default:uuid_generate_v4()"`
-	Name        string    `json:"name" gorm:"uniqueIndex;not null"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-// Database
-var db *gorm.DB
-
-func initDB() error {
-	// Supabase connection string
-	dsn := "postgresql://postgres:empatTH3010*#@db.bnpvryotcgvposlbbcbd.supabase.co:5432/postgres?sslmode=require"
-
-	var err error
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Database connection error: %v\n", err)
-		return fmt.Errorf("database connection failed: %v", err)
+// Initialize with default admin user
+func init() {
+	mu.Lock()
+	defer mu.Unlock()
+	
+	hash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+	adminID := uuid.New().String()
+	users["admin"] = User{
+		ID:           adminID,
+		Email:        "admin@wms.local",
+		Username:     "admin",
+		PasswordHash: string(hash),
+		FirstName:    "System",
+		LastName:     "Administrator",
+		IsActive:     true,
+		IsVerified:   true,
+		CreatedAt:    time.Now(),
 	}
-	
-	fmt.Println("Database connected successfully")
-	
-	// Auto migrate
-	if err := db.AutoMigrate(&User{}, &Role{}); err != nil {
-		fmt.Fprintf(os.Stderr, "AutoMigrate error: %v\n", err)
-		return fmt.Errorf("auto migrate failed: %v", err)
-	}
-	
-	fmt.Println("AutoMigrate completed")
-	
-	return nil
+	users[adminID] = users["admin"]
 }
 
 // JWT
@@ -84,9 +70,9 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func generateToken(userID uuid.UUID, username, email string) (string, error) {
+func generateToken(userID, username, email string) (string, error) {
 	claims := Claims{
-		UserID:   userID.String(),
+		UserID:   userID,
 		Username: username,
 		Email:    email,
 		Roles:    []string{},
@@ -113,39 +99,40 @@ func register(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	// Validate
 	if req.Username == "" || req.Email == "" || req.Password == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "All fields are required"})
 	}
 
-	if db == nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Database not initialized"})
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Check if user exists
+	if _, exists := users[req.Username]; exists {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "Username already exists"})
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Password hash error: %v\n", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to hash password"})
 	}
 
 	user := User{
-		ID:           uuid.New(),
+		ID:           uuid.New().String(),
 		Email:        req.Email,
 		Username:     req.Username,
 		PasswordHash: string(hash),
 		IsActive:     true,
 		IsVerified:   false,
+		CreatedAt:    time.Now(),
 	}
 
-	if err := db.Create(&user).Error; err != nil {
-		fmt.Fprintf(os.Stderr, "Create user error: %v\n", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create user: %v", err)})
-	}
+	users[user.Username] = user
+	users[user.ID] = user
 
 	return c.JSON(http.StatusCreated, map[string]interface{}{
 		"message": "User registered successfully",
 		"user": map[string]string{
-			"id":       user.ID.String(),
+			"id":       user.ID,
 			"email":    user.Email,
 			"username": user.Username,
 		},
@@ -167,12 +154,11 @@ func login(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Username and password are required"})
 	}
 
-	if db == nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Database not initialized"})
-	}
+	mu.RLock()
+	user, exists := users[req.Username]
+	mu.RUnlock()
 
-	var user User
-	if err := db.Where("username = ? OR email = ?", req.Username, req.Username).First(&user).Error; err != nil {
+	if !exists {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid credentials"})
 	}
 
@@ -184,9 +170,10 @@ func login(c echo.Context) error {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "Account deactivated"})
 	}
 
-	now := time.Now()
-	user.LastLoginAt = &now
-	db.Save(&user)
+	mu.Lock()
+	user.LastLoginAt = time.Now()
+	users[req.Username] = user
+	mu.Unlock()
 
 	token, err := generateToken(user.ID, user.Username, user.Email)
 	if err != nil {
@@ -197,37 +184,32 @@ func login(c echo.Context) error {
 		"access_token": token,
 		"token_type":   "Bearer",
 		"expires_in":   86400,
-		"user": map[string]string{
-			"id":       user.ID.String(),
-			"email":    user.Email,
-			"username": user.Username,
+		"user": map[string]interface{}{
+			"id":         user.ID,
+			"email":      user.Email,
+			"username":   user.Username,
+			"first_name": user.FirstName,
+			"last_name":  user.LastName,
 		},
 	})
 }
 
 // Health check
 func health(c echo.Context) error {
-	dbStatus := "connected"
-	if db == nil {
-		dbStatus = "disconnected"
-	}
-	return c.JSON(http.StatusOK, map[string]string{
-		"status":     "healthy",
-		"service":    "auth",
-		"db_status":  dbStatus,
+	mu.RLock()
+	count := len(users)
+	mu.RUnlock()
+	
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":      "healthy",
+		"service":     "auth",
+		"db_status":   "in-memory",
+		"user_count":  count,
 	})
 }
 
 // Main Handler
 func Handler(w http.ResponseWriter, r *http.Request) {
-	// Initialize DB if not already done
-	if db == nil {
-		if err := initDB(); err != nil {
-			fmt.Fprintf(os.Stderr, "Database init error: %v\n", err)
-			// Continue without DB - health check still works
-		}
-	}
-
 	e := echo.New()
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
