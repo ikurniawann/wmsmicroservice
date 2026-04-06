@@ -15,13 +15,22 @@ var DB *gorm.DB
 func InitDB() {
 	host := getEnv("DB_HOST", "localhost")
 	port := getEnv("DB_PORT", "5432")
-	user := getEnv("DB_USER", "wms")
-	password := getEnv("DB_PASSWORD", "wms123")
-	dbname := getEnv("DB_NAME", "wmsdb")
-	schema := getEnv("DB_SCHEMA", "auth")
+	user := getEnv("DB_USER", "postgres")
+	password := getEnv("DB_PASSWORD", "")
+	dbname := getEnv("DB_NAME", "postgres")
+	schema := getEnv("DB_SCHEMA", "public")
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable search_path=%s",
-		host, user, password, dbname, port, schema)
+	// Build DSN for Supabase or local
+	var dsn string
+	if host == "localhost" {
+		// Local development
+		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable search_path=%s",
+			host, user, password, dbname, port, schema)
+	} else {
+		// Supabase or cloud PostgreSQL
+		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require search_path=%s",
+			host, user, password, dbname, port, schema)
+	}
 
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -41,7 +50,7 @@ func InitDB() {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	fmt.Println("✅ Database connected successfully")
+	fmt.Println("✅ Database connected successfully to:", host)
 }
 
 func getEnv(key, defaultValue string) string {
